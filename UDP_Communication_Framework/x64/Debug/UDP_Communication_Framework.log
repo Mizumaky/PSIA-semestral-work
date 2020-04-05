@@ -1,1 +1,4 @@
-﻿
+﻿  stdafx.cpp
+  UDP_Communication_Framework.cpp
+C:\Users\mmull\win_code\PSIA\semestralka\psia-semestral\UDP_Communication_Framework\UDP_Communication_Framework.cpp(68,7): warning C4101: 'buffer_tx': unreferenced local variable
+  UDP_Communication_Framework.vcxproj -> C:\Users\mmull\win_code\PSIA\semestralka\psia-semestral\x64\Debug\UDP_Communication_Framework.exe
