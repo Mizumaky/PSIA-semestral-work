@@ -26,7 +26,7 @@ int main()
 	char buffer[10][BUFLEN];
 	MD5 md5;
 	WSADATA wsa;
-	char* filename = "file.txt";
+	char* filename = "test.png";
 	int delay = 0;
 	char *hash = md5.digestFile(filename);
 	//Initialise winsock
@@ -64,13 +64,13 @@ start:
 	sprintf(char_size, "%d", size_of_file);
 	//start communication
 	//send filename
-	if (sendto(s, filename, sizeof(filename), 0, (struct sockaddr *) &si_other, slen) == SOCKET_ERROR)
+	if ((sendto(s, filename, sizeof(filename), 0, (struct sockaddr *) &si_other, slen)) == SOCKET_ERROR)
 	{
 		printf("sendto() failed with error code : %d", WSAGetLastError());
 		getchar();
 		exit(EXIT_FAILURE);
 	}//send size of file
-	if (sendto(s, char_size, sizeof(char_size), 0, (struct sockaddr *) &si_other, slen) == SOCKET_ERROR)
+	if ((sendto(s, char_size, sizeof(char_size), 0, (struct sockaddr *) &si_other, slen)) == SOCKET_ERROR)
 	{
 		printf("sendto() failed with error code : %d", WSAGetLastError());
 		getchar();
@@ -82,7 +82,7 @@ start:
 
 	for (int i = 0; i < packetsNumber; i++)
 	{
-		memset(buffer, '\0', BUFLEN);
+		//memset(buffer, '\0', BUFLEN);
 		//send size of buffer[i]
 		if (size_of_file > BUFLEN) {
 			fread(buffer[i], sizeof(char), BUFLEN, f);
@@ -97,7 +97,7 @@ start:
 		
 		
 		//send the file packet
-		if (sendto(s, buffer[i], BUFLEN, 0, (struct sockaddr *) &si_other, slen) == SOCKET_ERROR)
+		if ((sendto(s, buffer[i], BUFLEN, 0, (struct sockaddr *) &si_other, slen)) == SOCKET_ERROR)
 		{
 			printf("sendto() failed with error code : %d", WSAGetLastError());
 			exit(EXIT_FAILURE);
