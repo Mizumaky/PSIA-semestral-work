@@ -41,8 +41,8 @@ std::string type_to_str[] = {
 
 void add_crc(char * packet, int len) {
 	CRC32 crc32;
-	std::string computed_crc = crc32(&packet[CRC_LEN], len).c_str();
-	memcpy(&packet, &computed_crc, CRC_LEN);
+	const char* computed_crc = crc32(&packet[CRC_LEN], len).c_str();
+	memcpy(&packet, computed_crc, CRC_LEN);
 }
 
 void pack_data(int packet_num, char * &buf, int len) {
