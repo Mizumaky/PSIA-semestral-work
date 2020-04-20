@@ -41,7 +41,7 @@ std::string type_to_str[] = {
 
 void add_crc(char * packet, int len) {
 	CRC32 crc32;
-	std::string computed_crc = crc32(&packet[CRC_LEN], len);
+	std::string computed_crc = crc32(&packet[CRC_LEN], len).c_str();
 	memcpy(&packet, &computed_crc, CRC_LEN);
 }
 
@@ -60,7 +60,7 @@ void send_size_of_file(int file_size, int s, int flags, const sockaddr * to, int
 	char type = (char)LEN;
 		memcpy(&buf[CRC_LEN], &type, sizeof(char));
 	memcpy(&buf[CRC_LEN + 1], &file_size, len);
-	add_crc(buf, sizeof(char));
+	add_crc(buf, sizeof(char_size));
 	send_or_fail(s, buf, len, flags, to, tolen);
 }
 void send_filename(const char *  filename, int s, int flags, const sockaddr * to, int tolen) {
@@ -74,12 +74,11 @@ void send_filename(const char *  filename, int s, int flags, const sockaddr * to
 }
 
 void send_just_type(type_t  packet_type, int s, int flags, const sockaddr * to, int tolen) {
-	int len = sizeof(char) + CRC_LEN;
-	char* buf = (char*)malloc(len);
+	char* buf = (char*)calloc(BUFLEN,0);
 	char type = (char)packet_type;
 	memcpy(&buf[CRC_LEN], &type, sizeof(char));
-	add_crc(buf, sizeof(char));
-	send_or_fail(s, buf, len, flags, to, tolen);
+	add_crc(buf, sizeof(BUFLEN - CRC_LEN));
+	send_or_fail(s, buf, BUFLEN, flags, to, tolen);
 }
 
 
@@ -163,7 +162,7 @@ int main()
 
 
 	for (int i = 0; i < packetsNumber; i++) {
-		buffer[i] = (char*)malloc(BUFLEN * sizeof(char));
+		buffer[i] = (char*)calloc(BUFLEN * sizeof(char), 0);
 	}
 	for (int i = 0; i < packetsNumber; i++)
 	{
