@@ -9,10 +9,11 @@
 #include <fstream> 
 #include <string>  
 #include <cmath>
+#include <vector>
 #include "md5.h"
 #include <Windows.h>
 
-#define SERVER "192.168.30.19"  //ip address of udp server
+#define SERVER "192.168.30.27"  //ip address of udp server
 #define BUFLEN 1024  //Max length of buffer[i]
 
 
@@ -23,11 +24,13 @@ int main()
 	struct sockaddr_in si_other;
 	int s, slen = sizeof(si_other);
 	char check[BUFLEN];
-	char buffer[10][BUFLEN];
+
 	MD5 md5;
 	WSADATA wsa;
-	char* filename = "test.png";
-	int delay = 0;
+	char* filename = "DELEL_Header.jpg";
+
+	std::cout << strlen(filename);
+	int delay = 5;
 	char *hash = md5.digestFile(filename);
 	//Initialise winsock
 	printf("\nInitialising Winsock...");
@@ -60,11 +63,13 @@ start:
 	int size_of_file = ftell(f);
 	fseek(f, 0, SEEK_SET);
 	char char_size[1024];
-	
+
 	sprintf(char_size, "%d", size_of_file);
 	//start communication
 	//send filename
-	if ((sendto(s, filename, sizeof(filename), 0, (struct sockaddr *) &si_other, slen)) == SOCKET_ERROR)
+
+
+	if ((sendto(s, filename, strlen(filename), 0, (struct sockaddr *) &si_other, slen)) == SOCKET_ERROR)
 	{
 		printf("sendto() failed with error code : %d", WSAGetLastError());
 		getchar();
@@ -77,25 +82,29 @@ start:
 		exit(EXIT_FAILURE);
 	}
 	int packetsNumber = ceil((double)size_of_file / (double)BUFLEN);
-	printf("filesize %d pnum %d\n",size_of_file, packetsNumber);
+	printf("filesize %d pnum %d\n", size_of_file, packetsNumber);
+	char** buffer = (char**)malloc(packetsNumber * sizeof(char*));
 
 
+	for (int i = 0; i < packetsNumber; i++) {
+		buffer[i] = (char*)malloc(BUFLEN * sizeof(char));
+	}
 	for (int i = 0; i < packetsNumber; i++)
 	{
 		//memset(buffer, '\0', BUFLEN);
 		//send size of buffer[i]
 		if (size_of_file > BUFLEN) {
 			fread(buffer[i], sizeof(char), BUFLEN, f);
-			Sleep(delay * 1000);
+			Sleep(delay);
 		}
 		else {
 			fread(buffer[i], sizeof(char), size_of_file, f);
-			Sleep(delay * 1000);
+			Sleep(delay);
 		}
 		printf("Bytes left %d\n", size_of_file);
 		//printf("Buff: %s\n", buffer[i]);
-		
-		
+
+
 		//send the file packet
 		if ((sendto(s, buffer[i], BUFLEN, 0, (struct sockaddr *) &si_other, slen)) == SOCKET_ERROR)
 		{
@@ -107,7 +116,7 @@ start:
 		size_of_file = size_of_file - BUFLEN;
 	}
 
-	
+
 	closesocket(s);
 	WSACleanup();
 
