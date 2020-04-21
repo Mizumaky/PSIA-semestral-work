@@ -1,0 +1,8 @@
+﻿  crc32.cpp
+  sha256.cpp
+  Source.cpp
+j:\záloha windows 10 13.4.18\dokumenty\visual studio 2017\projects\psia-semestral\tut 1 - client\tut 1 - client\source.cpp(163): warning C4244: 'initializing': conversion from 'double' to 'int', possible loss of data
+  Generating code
+  All 121 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
+  Finished generating code
+  Tut 1 - Client.vcxproj -> J:\záloha windows 10 13.4.18\Dokumenty\Visual Studio 2017\Projects\psia-semestral\Tut 1 - Client\Release\Tut 1 - Client.exe

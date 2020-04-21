@@ -6,6 +6,7 @@
 #define _CRT_SECURE_NO_WARNINGS
 #include <WinSock2.h>
 #include <iostream>
+#include <vector>
 #include <fstream> 
 #include <string>  
 #include <cmath>
@@ -39,10 +40,21 @@ std::string type_to_str[] = {
 
 
 
+
+void send_or_fail(int s, const char * buf, int len, int flags, const sockaddr * to, int tolen) {
+
+	if ((sendto(s, buf, len, flags, to, tolen)) == SOCKET_ERROR)
+	{
+		printf("sendto() failed with error code : %d", WSAGetLastError());
+		getchar();
+		exit(EXIT_FAILURE);
+	}
+}
+
 void add_crc(char * packet, int len) {
 	CRC32 crc32;
-	const char* computed_crc = crc32(&packet[CRC_LEN], len).c_str();
-	memcpy(&packet, computed_crc, CRC_LEN);
+	std::string computed_crc = crc32(&packet[CRC_LEN], len);
+	memcpy(&packet, &computed_crc, CRC_LEN);
 }
 
 void pack_data(int packet_num, char * &buf, int len) {
@@ -53,44 +65,36 @@ void pack_data(int packet_num, char * &buf, int len) {
 }
 
 void send_size_of_file(int file_size, int s, int flags, const sockaddr * to, int tolen) {
-	char char_size[1024];
+	char char_size[BUFLEN-CRC_LEN-1];
 	sprintf(char_size, "%d", file_size);
-	int len = sizeof(char_size) + CRC_LEN;
-	char* buf = (char*)malloc(len);
+
+	char* buf = (char*)malloc(BUFLEN*sizeof(char));
 	char type = (char)LEN;
-		memcpy(&buf[CRC_LEN], &type, sizeof(char));
-	memcpy(&buf[CRC_LEN + 1], &file_size, len);
+	memcpy(&buf[CRC_LEN], &type, sizeof(char));
+	memcpy(&buf[CRC_LEN + 1], &file_size, sizeof(char_size));
 	add_crc(buf, sizeof(char_size));
-	send_or_fail(s, buf, len, flags, to, tolen);
+	send_or_fail(s, buf, BUFLEN, flags, to, tolen);
 }
 void send_filename(const char *  filename, int s, int flags, const sockaddr * to, int tolen) {
-	int len = strlen(filename) + CRC_LEN;
-	char* buf = (char*)malloc(len);
+	int len = strlen(filename) + CRC_LEN + 1;
+	char* buf = (char*)calloc(len, 1);
 	char type = (char)NAME;
-	memcpy(&buf[CRC_LEN], &type, sizeof(char));
-	memcpy(&buf[CRC_LEN + 1], &filename, len);
-	add_crc(buf, sizeof(char));
+	strcpy(&buf[CRC_LEN], &type);
+	strcpy(&buf[CRC_LEN + 1], filename);
+	std::cout << buf;
+	add_crc(buf, strlen(filename) + 1);
 	send_or_fail(s, buf, len, flags, to, tolen);
 }
 
 void send_just_type(type_t  packet_type, int s, int flags, const sockaddr * to, int tolen) {
-	char* buf = (char*)calloc(BUFLEN,0);
+	char* buf = (char*)calloc(BUFLEN,1);
 	char type = (char)packet_type;
 	memcpy(&buf[CRC_LEN], &type, sizeof(char));
 	add_crc(buf, sizeof(BUFLEN - CRC_LEN));
 	send_or_fail(s, buf, BUFLEN, flags, to, tolen);
+	free(buf);
 }
 
-
-void send_or_fail(int s, const char * buf, int len, int flags, const sockaddr * to, int tolen) {
-
-	if ((sendto(s, buf, len, flags, to, tolen)) == SOCKET_ERROR)
-		{
-		printf("sendto() failed with error code : %d", WSAGetLastError());
-		getchar();
-		exit(EXIT_FAILURE);
-		}
-}
 
 void recv_or_fail(int s, char * buf, int len, const sockaddr * si_other, int slen) {
 
@@ -158,38 +162,52 @@ int main()
 
 	int packetsNumber = ceil((double)size_of_file / (double)DATALEN);
 	printf("filesize %d pnum %d\n", size_of_file, packetsNumber);
-	char** buffer = (char**)malloc(packetsNumber * sizeof(char*));
+	std::vector<char*> buffer(packetsNumber);
 
+	FILE* file;
+	file = fopen("asdf.PNG", "wb");
+	if (!file) {
+		printf("Cannot open file for writing :c");
+		getchar();
+		return 1;
+	}
 
 	for (int i = 0; i < packetsNumber; i++) {
-		buffer[i] = (char*)calloc(BUFLEN * sizeof(char), 0);
+		buffer[i] = (char*)calloc(BUFLEN, 1);
 	}
 	for (int i = 0; i < packetsNumber; i++)
 	{
 		if (size_of_file > DATALEN) {
-			fread(&buffer[i][CRC_LEN + sizeof(int)], sizeof(char), DATALEN, f);
+			fread(&buffer[i][CRC_LEN + sizeof(int)+1], sizeof(char), DATALEN, f);
 			pack_data(i, buffer[i], DATALEN);
 			Sleep(delay);
 		}
 		else {
-			fread(&buffer[i][CRC_LEN + sizeof(int)], sizeof(char), size_of_file, f);
+			fread(&buffer[i][CRC_LEN + sizeof(int) + 1], sizeof(char), size_of_file, f);
 			pack_data(i, buffer[i], size_of_file);
 			Sleep(delay);
 		}
-		printf("Bytes left %d\n", size_of_file);
+		printf("Current packet %d Bytes left %d\n",i ,size_of_file);
 		//printf("Buff: %s\n", buffer[i]);
 
+		
+		//fwrite(&buffer[i][, sizeof(char), size_of_file>=DATALEN?DATALEN:size_of_file, file);
+		
+
 		bool success = false;
+
 		//send the file packet
 		while (!success) {
 			send_or_fail(socket_num, buffer[i], DATALEN, 0, (struct sockaddr *) &si_other, slen);
 			char tmp[BUFLEN];
 			recv_or_fail(socket_num, tmp, BUFLEN, (struct sockaddr *) &si_other, slen);
 			success = (type_t)tmp[0] == OK;
+			if (!success) std::cout << "FAIL " << i << '\n';
 		}
 		size_of_file = size_of_file - DATALEN;
 	}
 
+	fclose(file);
 
 	closesocket(socket_num);
 	WSACleanup();
