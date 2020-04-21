@@ -2,6 +2,8 @@
 //
 
 #pragma comment(lib,"ws2_32.lib")
+#define SIO_UDP_CONNRESET _WSAIOW(IOC_VENDOR, 12)
+
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 #define _CRT_SECURE_NO_WARNINGS
 #include <WinSock2.h>
@@ -15,12 +17,13 @@
 #include "sha256.h"
 #include <Windows.h>
 
-#define SERVER "192.168.30.27"  //ip address of udp server
+#define SERVER "127.0.0.1"  //ip address of udp server
 #define BUFLEN 1024  //Max length of buffer[i]
-#define DATALEN 1010 //Max length of data in data packet
+#define DATALEN 1011 //Max length of data in data packet
 #define CRC_LEN 8
 
-#define PORT 5555   //The port on which to listen for incoming data
+#define TARGET_PORT 5555  
+#define LOCAL_PORT 4444  
 enum type_t
 {
 	START = 0,
@@ -53,44 +56,46 @@ void send_or_fail(int s, const char * buf, int len, int flags, const sockaddr * 
 
 void add_crc(char * packet, int len) {
 	CRC32 crc32;
-	std::string computed_crc = crc32(&packet[CRC_LEN], len);
-	memcpy(&packet, &computed_crc, CRC_LEN);
+	std::string  computed_crc = crc32(&packet[CRC_LEN], len);
+
+	std::cout << packet << " packet\n";
+	std::cout << type_to_str[packet[CRC_LEN]]<< " packet type\n";
+	std::cout << computed_crc << " str\n";
+	
+	memcpy(packet, &computed_crc, CRC_LEN);
+	std::cout << packet << " crc packet\n";
 }
 
 void pack_data(int packet_num, char * &buf, int len) {
-	char type = (char)DATA;
-	memcpy(&buf[CRC_LEN], &type, sizeof(char));
+	// TODO: Fix this
+	buf[CRC_LEN] = DATA;
 	memcpy(&buf[CRC_LEN + 1], &packet_num, sizeof(int));
-	add_crc(buf, len + sizeof(int) + sizeof(char));
+	add_crc(buf, BUFLEN - CRC_LEN);
 }
 
 void send_size_of_file(int file_size, int s, int flags, const sockaddr * to, int tolen) {
 	char char_size[BUFLEN-CRC_LEN-1];
 	sprintf(char_size, "%d", file_size);
 
-	char* buf = (char*)malloc(BUFLEN*sizeof(char));
-	char type = (char)LEN;
-	memcpy(&buf[CRC_LEN], &type, sizeof(char));
-	memcpy(&buf[CRC_LEN + 1], &file_size, sizeof(char_size));
-	add_crc(buf, sizeof(char_size));
+	char* buf = (char*)calloc(BUFLEN, sizeof(char));
+	buf[CRC_LEN] = (char)LEN;
+	strcpy(&buf[CRC_LEN + 1], char_size);
+	add_crc(buf, BUFLEN - CRC_LEN);
 	send_or_fail(s, buf, BUFLEN, flags, to, tolen);
 }
 void send_filename(const char *  filename, int s, int flags, const sockaddr * to, int tolen) {
-	int len = strlen(filename) + CRC_LEN + 1;
-	char* buf = (char*)calloc(len, 1);
-	char type = (char)NAME;
-	strcpy(&buf[CRC_LEN], &type);
+	char* buf = (char*)calloc(BUFLEN, sizeof(char));
+	buf[CRC_LEN] = (char)NAME;
 	strcpy(&buf[CRC_LEN + 1], filename);
 	std::cout << buf;
-	add_crc(buf, strlen(filename) + 1);
-	send_or_fail(s, buf, len, flags, to, tolen);
+	add_crc(buf, BUFLEN - CRC_LEN);
+	send_or_fail(s, buf, BUFLEN, flags, to, tolen);
 }
 
 void send_just_type(type_t  packet_type, int s, int flags, const sockaddr * to, int tolen) {
-	char* buf = (char*)calloc(BUFLEN,1);
-	char type = (char)packet_type;
-	memcpy(&buf[CRC_LEN], &type, sizeof(char));
-	add_crc(buf, sizeof(BUFLEN - CRC_LEN));
+	char* buf = (char*)calloc(BUFLEN, sizeof(char));
+	buf[CRC_LEN] = packet_type;
+	add_crc(buf, BUFLEN - CRC_LEN);
 	send_or_fail(s, buf, BUFLEN, flags, to, tolen);
 	free(buf);
 }
@@ -111,9 +116,11 @@ void recv_or_fail(int s, char * buf, int len, const sockaddr * si_other, int sle
 int main()
 {
 	struct sockaddr_in si_other;
+	struct sockaddr_in local_address;
 	int socket_num, slen = sizeof(si_other);
 
 	WSADATA wsa;
+
 
 
 	char* filename = "test.PNG";
@@ -130,16 +137,30 @@ int main()
 	printf("Initialised.\n");
 
 	//create socket
+	local_address.sin_family = AF_INET;
+	local_address.sin_port = htons(LOCAL_PORT);
+	local_address.sin_addr.s_addr = INADDR_ANY;
+
 	if ((socket_num = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == SOCKET_ERROR)
 	{
 		printf("socket() failed with error code : %d", WSAGetLastError());
 		exit(EXIT_FAILURE);
 	}
 
+	if (bind(socket_num, reinterpret_cast<sockaddr*>(&local_address), sizeof(local_address)) != 0) {
+		std::cout << "socket binding unsuccessful";
+		exit(EXIT_FAILURE);
+	}
+
+	BOOL bNewBehavior = FALSE;
+	DWORD dwBytesReturned = 0;
+	WSAIoctl(socket_num, SIO_UDP_CONNRESET, &bNewBehavior, sizeof bNewBehavior, NULL, 0, &dwBytesReturned, NULL, NULL);
+
+
 	//setup address structure
 	memset((char *)&si_other, 0, sizeof(si_other));
 	si_other.sin_family = AF_INET;
-	si_other.sin_port = htons(PORT);
+	si_other.sin_port = htons(TARGET_PORT);
 	si_other.sin_addr.S_un.S_addr = inet_addr(SERVER);
 
 	FILE *f = fopen(filename, "rb");
@@ -153,6 +174,8 @@ int main()
 
 	//start communication
 
+	
+	send_just_type(START, socket_num, 0, (struct sockaddr *) &si_other, slen);
 	//send filename
 	send_filename(filename, socket_num, 0, (struct sockaddr *) &si_other, slen);
 
@@ -164,13 +187,6 @@ int main()
 	printf("filesize %d pnum %d\n", size_of_file, packetsNumber);
 	std::vector<char*> buffer(packetsNumber);
 
-	FILE* file;
-	file = fopen("asdf.PNG", "wb");
-	if (!file) {
-		printf("Cannot open file for writing :c");
-		getchar();
-		return 1;
-	}
 
 	for (int i = 0; i < packetsNumber; i++) {
 		buffer[i] = (char*)calloc(BUFLEN, 1);
@@ -180,12 +196,11 @@ int main()
 		if (size_of_file > DATALEN) {
 			fread(&buffer[i][CRC_LEN + sizeof(int)+1], sizeof(char), DATALEN, f);
 			pack_data(i, buffer[i], DATALEN);
-			Sleep(delay);
 		}
 		else {
 			fread(&buffer[i][CRC_LEN + sizeof(int) + 1], sizeof(char), size_of_file, f);
 			pack_data(i, buffer[i], size_of_file);
-			Sleep(delay);
+			
 		}
 		printf("Current packet %d Bytes left %d\n",i ,size_of_file);
 		//printf("Buff: %s\n", buffer[i]);
@@ -200,14 +215,15 @@ int main()
 		while (!success) {
 			send_or_fail(socket_num, buffer[i], DATALEN, 0, (struct sockaddr *) &si_other, slen);
 			char tmp[BUFLEN];
+			Sleep(delay);
 			recv_or_fail(socket_num, tmp, BUFLEN, (struct sockaddr *) &si_other, slen);
 			success = (type_t)tmp[0] == OK;
-			if (!success) std::cout << "FAIL " << i << '\n';
+			if (!success) { std::cout << "FAIL " << i << '\n'; getchar();}
 		}
 		size_of_file = size_of_file - DATALEN;
 	}
 
-	fclose(file);
+	fclose(f);
 
 	closesocket(socket_num);
 	WSACleanup();
