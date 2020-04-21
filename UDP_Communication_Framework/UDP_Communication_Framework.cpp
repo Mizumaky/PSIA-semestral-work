@@ -228,7 +228,6 @@ int main()
                 break;
             }
 
-
             // Confirm recieving
             SendOK();
 
