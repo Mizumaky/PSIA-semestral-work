@@ -21,6 +21,7 @@
 #define BUFLEN 1024  //Max length of buffer[i]
 #define DATALEN 1011 //Max length of data in data packet
 #define CRC_LEN 8
+#define DELAY 20
 
 #define TARGET_PORT 5555  
 #define LOCAL_PORT 4444  
@@ -42,28 +43,49 @@ std::string type_to_str[] = {
 };
 
 
-
-
 void send_or_fail(int s, const char * buf, int len, int flags, const sockaddr * to, int tolen) {
-
-	if ((sendto(s, buf, len, flags, to, tolen)) == SOCKET_ERROR)
-	{
-		printf("sendto() failed with error code : %d", WSAGetLastError());
-		getchar();
-		exit(EXIT_FAILURE);
+	bool success = false;
+	while (!success) {
+		if ((sendto(s, buf, len, flags, to, tolen)) == SOCKET_ERROR)
+		{
+			printf("sendto() failed with error code : %d", WSAGetLastError());
+			getchar();
+			exit(EXIT_FAILURE);
+		}
+		char tmp[BUFLEN];
+		Sleep(DELAY);
+		if ((recvfrom(s, tmp, len, 0, NULL, NULL)) == SOCKET_ERROR)
+		{
+			printf("recvfrom() failed with error code : %d", WSAGetLastError());
+			getchar();
+			exit(EXIT_FAILURE);
+		}
+		success = (type_t)tmp[0] == OK;
+		if (!success) { std::cout << "FAIL\n"; getchar(); }
+		else { std::cout << "OKK\n"; }
 	}
+}
+
+std::string string_to_hex(const std::string& input)
+{
+	static const char hex_digits[] = "0123456789ABCDEF";
+
+	std::string output;
+	output.reserve(input.length() * 2);
+	for (int i = 0; i < BUFLEN; i++)
+	{
+		output.push_back(hex_digits[input[i] >> 4]);
+		output.push_back(hex_digits[input[i] & 15]);
+	}
+	return output;
 }
 
 void add_crc(char * packet, int len) {
 	CRC32 crc32;
 	std::string  computed_crc = crc32(&packet[CRC_LEN], len);
 
-	std::cout << packet << " packet\n";
-	std::cout << type_to_str[packet[CRC_LEN]]<< " packet type\n";
-	std::cout << computed_crc << " str\n";
-	
 	memcpy(packet, &computed_crc, CRC_LEN);
-	std::cout << packet << " crc packet\n";
+	//std::cout << string_to_hex(packet) << " Packet\n";
 }
 
 void pack_data(int packet_num, char * &buf, int len) {
@@ -101,17 +123,6 @@ void send_just_type(type_t  packet_type, int s, int flags, const sockaddr * to, 
 }
 
 
-void recv_or_fail(int s, char * buf, int len, const sockaddr * si_other, int slen) {
-
-	if ((recvfrom(s, buf, len, 0, (struct sockaddr *) &si_other, &slen)) == SOCKET_ERROR)
-	{
-		printf("recvfrom() failed with error code : %d", WSAGetLastError());
-		getchar();
-		exit(EXIT_FAILURE);
-	}
-}
-
-
 
 int main()
 {
@@ -126,7 +137,6 @@ int main()
 	char* filename = "test.PNG";
 
 	std::cout << strlen(filename);
-	int delay = 5;
 	//Initialise winsock
 	printf("\nInitialising Winsock...");
 	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
@@ -195,10 +205,12 @@ int main()
 	{
 		if (size_of_file > DATALEN) {
 			fread(&buffer[i][CRC_LEN + sizeof(int)+1], sizeof(char), DATALEN, f);
+			Sleep(DELAY);
 			pack_data(i, buffer[i], DATALEN);
 		}
 		else {
 			fread(&buffer[i][CRC_LEN + sizeof(int) + 1], sizeof(char), size_of_file, f);
+			Sleep(DELAY);
 			pack_data(i, buffer[i], size_of_file);
 			
 		}
@@ -209,17 +221,8 @@ int main()
 		//fwrite(&buffer[i][, sizeof(char), size_of_file>=DATALEN?DATALEN:size_of_file, file);
 		
 
-		bool success = false;
 
-		//send the file packet
-		while (!success) {
-			send_or_fail(socket_num, buffer[i], DATALEN, 0, (struct sockaddr *) &si_other, slen);
-			char tmp[BUFLEN];
-			Sleep(delay);
-			recv_or_fail(socket_num, tmp, BUFLEN, (struct sockaddr *) &si_other, slen);
-			success = (type_t)tmp[0] == OK;
-			if (!success) { std::cout << "FAIL " << i << '\n'; getchar();}
-		}
+		send_or_fail(socket_num, buffer[i], DATALEN, 0, (struct sockaddr *) &si_other, slen);
 		size_of_file = size_of_file - DATALEN;
 	}
 
