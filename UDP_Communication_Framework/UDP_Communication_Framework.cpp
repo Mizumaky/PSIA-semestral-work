@@ -161,20 +161,8 @@ int main()
             }
             const type_t type = type_t(packet[CRC_LEN]);
 
-            // Get packet number
-            int32_t recieved_num;
-            memcpy(&recieved_num, &packet[CRC_LEN + TYPE_LEN], 4);
-            if (recieved_num == expected_num - 1) {
-                Warning("recieved the same packet as before");
-                SendOK();
-                continue;
-            }
-            else if (recieved_num != expected_num) {
-                Error("recieved packet out of order, expected #" + std::to_string(expected_num) + ", recieved #" + std::to_string(recieved_num));
-                break;
-            }
-            expected_num++;
-            Info("recieved packet #" + std::to_string(recieved_num) + " of type " + type_to_str[type]);
+         
+            Info("recieved packet of type " + type_to_str[type]);
 
             // --- Decide what to do depending on type ---
             // START
@@ -182,12 +170,12 @@ int main()
             }
             // FILENAME
             else if (state == START && type == NAME) {
-                strcpy(filename, &packet[CRC_LEN + TYPE_LEN + NUM_LEN]);
+                strcpy(filename, &packet[CRC_LEN + TYPE_LEN]);
                 Info("filename set to \"" + std::string(filename) + "\"");
             }
             // FILE SIZE
             else if (state == NAME && type == LEN) {
-                if (sscanf(&packet[CRC_LEN + TYPE_LEN + NUM_LEN], "%d", &file_size) < 0) {
+                if (sscanf(&packet[CRC_LEN + TYPE_LEN], "%d", &file_size) < 0) {
                     Error("cannot convert characters to integer");
                     break;
                 }
@@ -196,6 +184,22 @@ int main()
             }
             // DATA
             else if ((state == LEN || state == DATA) && type == DATA) {
+				// Get packet number
+				int32_t recieved_num;
+				memcpy(&recieved_num, &packet[CRC_LEN + TYPE_LEN], 4);
+				if (recieved_num == expected_num - 1) {
+					Warning("recieved the same packet as before");
+					SendOK();
+					continue;
+				}
+				else if (recieved_num != expected_num) {
+					Error("recieved packet out of order, expected #" + std::to_string(expected_num) + ", recieved #" + std::to_string(recieved_num));
+					break;
+				}
+				expected_num++;
+
+				Info("recieved packet #" + std::to_string(recieved_num));
+
                 const int data_size_to_copy = file_size - recieved_data_size < DATA_LEN ? file_size - recieved_data_size : DATA_LEN;
                 memcpy(&data[recieved_data_size], &packet[CRC_LEN + TYPE_LEN + NUM_LEN], data_size_to_copy);
                 recieved_data_size += data_size_to_copy;
@@ -204,7 +208,7 @@ int main()
             // SHA256
             else if (state == DATA && type == CHKSUM) {
                 char sha_tmp[SHA_LEN + 1] = "";
-                std::string recieved_sha = strncpy(sha_tmp, &packet[CRC_LEN + TYPE_LEN + NUM_LEN], SHA_LEN);
+                std::string recieved_sha = strncpy(sha_tmp, &packet[CRC_LEN + TYPE_LEN], SHA_LEN);
                 SHA256 sha256;
                 std::string computed_sha = sha256(data, file_size);
                 if (computed_sha != recieved_sha) {
