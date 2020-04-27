@@ -66,26 +66,13 @@ void send_or_fail(int s, const char * buf, int len, int flags, const sockaddr * 
 	}
 }
 
-std::string string_to_hex(const std::string& input)
-{
-	static const char hex_digits[] = "0123456789ABCDEF";
-
-	std::string output;
-	output.reserve(input.length() * 2);
-	for (int i = 0; i < BUFLEN; i++)
-	{
-		output.push_back(hex_digits[input[i] >> 4]);
-		output.push_back(hex_digits[input[i] & 15]);
-	}
-	return output;
-}
 
 void add_crc(char * packet, int len) {
 	CRC32 crc32;
 	std::string  computed_crc = crc32(&packet[CRC_LEN], len);
 
 	memcpy(packet, &computed_crc, CRC_LEN);
-	//std::cout << string_to_hex(packet) << " Packet\n";
+
 }
 
 void pack_data(int packet_num, char * &buf, int len) {
@@ -109,7 +96,13 @@ void send_filename(const char *  filename, int s, int flags, const sockaddr * to
 	char* buf = (char*)calloc(BUFLEN, sizeof(char));
 	buf[CRC_LEN] = (char)NAME;
 	strcpy(&buf[CRC_LEN + 1], filename);
-	std::cout << buf;
+	add_crc(buf, BUFLEN - CRC_LEN);
+	send_or_fail(s, buf, BUFLEN, flags, to, tolen);
+}
+void send_check_sum(std::string  checksum, int s, int flags, const sockaddr * to, int tolen) {
+	char* buf = (char*)calloc(BUFLEN, sizeof(char));
+	buf[CRC_LEN] = (char)CHKSUM;
+	strcpy(&buf[CRC_LEN + 1], checksum.c_str());
 	add_crc(buf, BUFLEN - CRC_LEN);
 	send_or_fail(s, buf, BUFLEN, flags, to, tolen);
 }
@@ -182,50 +175,67 @@ int main()
 	int size_of_file = ftell(f);
 	fseek(f, 0, SEEK_SET);
 
-	//start communication
-
-	
-	send_just_type(START, socket_num, 0, (struct sockaddr *) &si_other, slen);
-	//send filename
-	send_filename(filename, socket_num, 0, (struct sockaddr *) &si_other, slen);
-
-		//send size of file
-	send_size_of_file(size_of_file, socket_num, 0, (struct sockaddr *) &si_other, slen);
-
-
 	int packetsNumber = ceil((double)size_of_file / (double)DATALEN);
 	printf("filesize %d pnum %d\n", size_of_file, packetsNumber);
 	std::vector<char*> buffer(packetsNumber);
 
 
+	//start communication
+
+
+	send_just_type(START, socket_num, 0, (struct sockaddr *) &si_other, slen);
+	//send filename
+	send_filename(filename, socket_num, 0, (struct sockaddr *) &si_other, slen);
+
+	//send size of file
+	send_size_of_file(size_of_file, socket_num, 0, (struct sockaddr *) &si_other, slen);
+
+	int tmp_size_of_file = size_of_file;
 	for (int i = 0; i < packetsNumber; i++) {
 		buffer[i] = (char*)calloc(BUFLEN, 1);
-	}
-	for (int i = 0; i < packetsNumber; i++)
-	{
-		if (size_of_file > DATALEN) {
-			fread(&buffer[i][CRC_LEN + sizeof(int)+1], sizeof(char), DATALEN, f);
+		
+		if (tmp_size_of_file > DATALEN) {
+			fread(&buffer[i][CRC_LEN + sizeof(int) + 1], sizeof(char), DATALEN, f);
 			Sleep(DELAY);
 			pack_data(i, buffer[i], DATALEN);
 		}
 		else {
-			fread(&buffer[i][CRC_LEN + sizeof(int) + 1], sizeof(char), size_of_file, f);
+			fread(&buffer[i][CRC_LEN + sizeof(int) + 1], sizeof(char), tmp_size_of_file, f);
 			Sleep(DELAY);
-			pack_data(i, buffer[i], size_of_file);
-			
+			pack_data(i, buffer[i], tmp_size_of_file);
+
 		}
-		printf("Current packet %d Bytes left %d\n",i ,size_of_file);
-		//printf("Buff: %s\n", buffer[i]);
-
-		
-		//fwrite(&buffer[i][, sizeof(char), size_of_file>=DATALEN?DATALEN:size_of_file, file);
-		
-
-
-		send_or_fail(socket_num, buffer[i], DATALEN, 0, (struct sockaddr *) &si_other, slen);
-		size_of_file = size_of_file - DATALEN;
+		tmp_size_of_file = tmp_size_of_file - DATALEN;
 	}
 
+
+	for (int i = 0; i < packetsNumber; i++)
+	{
+		printf("Current packet %d\n", i);
+
+		send_or_fail(socket_num, buffer[i], BUFLEN, 0, (struct sockaddr *) &si_other, slen);
+		
+	}
+
+	//CHECK SUM
+	SHA256 sha256;
+	tmp_size_of_file = size_of_file;
+	for (int i = 0; i < packetsNumber; i++) {
+
+		if (tmp_size_of_file > DATALEN) {
+
+			sha256.add(&buffer[i][CRC_LEN + sizeof(int) + 1], DATALEN);
+		}
+		else {
+			sha256.add(&buffer[i][CRC_LEN + sizeof(int) + 1], tmp_size_of_file);
+		}
+		tmp_size_of_file = tmp_size_of_file - DATALEN;
+	}
+
+	//send filename
+	send_check_sum(sha256.getHash(), socket_num, 0, (struct sockaddr *) &si_other, slen);
+
+	send_just_type(END, socket_num, 0, (struct sockaddr *) &si_other, slen);
 	fclose(f);
 
 	closesocket(socket_num);
