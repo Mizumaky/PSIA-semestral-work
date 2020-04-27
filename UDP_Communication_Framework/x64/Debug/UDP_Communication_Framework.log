@@ -1,4 +1,2 @@
 ﻿  UDP_Communication_Framework.cpp
-C:\Users\mmull\win_code\PSIA\UDP_Communication_Framework v2\UDP_Communication_Framework\UDP_Communication_Framework.cpp(115,29): warning C4018: '<': signed/unsigned mismatch
-C:\Users\mmull\win_code\PSIA\UDP_Communication_Framework v2\UDP_Communication_Framework\UDP_Communication_Framework.cpp(68,7): warning C4101: 'buffer_tx': unreferenced local variable
-  UDP_Communication_Framework.vcxproj -> C:\Users\mmull\win_code\PSIA\UDP_Communication_Framework v2\x64\Debug\UDP_Communication_Framework.exe
+  UDP_Communication_Framework.vcxproj -> C:\Users\mmull\win_code\PSIA\uloha 2\UDP_Communication_Framework v2\x64\Debug\UDP_Communication_Framework.exe

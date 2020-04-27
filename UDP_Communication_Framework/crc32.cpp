@@ -4,6 +4,7 @@
 // see http://create.stephan-brumme.com/disclaimer.html
 //
 
+#include "stdafx.h"
 #include "crc32.h"
 
 // big endian architectures need #define __BYTE_ORDER __BIG_ENDIAN

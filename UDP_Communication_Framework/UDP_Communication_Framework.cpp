@@ -10,15 +10,16 @@
 #include "sha256.h"
 
 // SETTINGS
-#define TARGET_IP	"127.0.0.1"
+#define TARGET_IP	"192.168.30.24"
 #define BUFFERS_LEN 1024
 #define CRC_LEN 8
 #define TYPE_LEN 1
 #define NUM_LEN 4
 #define DATA_LEN (BUFFERS_LEN - CRC_LEN - TYPE_LEN - NUM_LEN)
 #define SHA_LEN 64
-#define TARGET_PORT 8888
+#define TARGET_PORT 4444
 #define LOCAL_PORT 5555
+#define DEBUG false
 
 enum type_t
 {
@@ -51,6 +52,7 @@ void Error(std::string text)
     std::string error_text = "ERROR: " + text + " :C\n" + "INTERNAL ERRNO: ";
     perror(error_text.c_str());
     std::cerr << "\n";
+    getchar();
 }
 
 void Warning(std::string text)
@@ -88,11 +90,9 @@ void InitApp()
 
 char* RecievePacket()
 {
-    sockaddr_in from_adress;
-    int from_addr_len;
     const auto data = new char[BUFFERS_LEN];
     //memset(com.buffer_rx, 0, BUFFERS_LEN);
-    if (recvfrom(com.socket, com.buffer_rx, BUFFERS_LEN, 0, reinterpret_cast<sockaddr*>(&from_adress), &from_addr_len) == SOCKET_ERROR) {
+    if (recvfrom(com.socket, com.buffer_rx, BUFFERS_LEN, 0, nullptr, nullptr) == SOCKET_ERROR) {
         Error("could not recieve data - socket error or timeout");
     }
     memcpy(data, com.buffer_rx, BUFFERS_LEN);
@@ -141,6 +141,14 @@ int main()
             // Recieve somthin
             delete[] packet;
             packet = RecievePacket();
+            Info("PACKET RECIEVED");
+            if (DEBUG) {
+                Info("--- PACKET START ---");
+                for (int i = 0; i < BUFFERS_LEN; ++i) {
+                    printf("%c",packet[i]);
+                }
+                Info("--- PACKET END ---");
+            }
 
             // Check CRC
             char crc_tmp[CRC_LEN + 1] = "";
@@ -148,7 +156,7 @@ int main()
             CRC32 crc32;
             std::string computed_crc = crc32(&packet[CRC_LEN], BUFFERS_LEN - CRC_LEN);
             if (computed_crc != recieved_crc) {
-                Warning("CRC check FAILED, recieved: " + recieved_crc + ", computed: " + computed_crc);
+                Warning("recieved a packet but CRC check FAILED, recieved: " + recieved_crc + ", computed: " + computed_crc);
                 SendERR();
                 Info("ERR packet sent back");
                 continue;
@@ -224,7 +232,7 @@ int main()
                 Info("File saved");
             }
             else {
-                Error("recieved packet of type " + type_to_str[type] + " while in state " + type_to_str[state] + ", that was unexpected");
+                Warning("recieved packet of type " + type_to_str[type] + " while in state " + type_to_str[state] + ", that was unexpected");
                 break;
             }
 
