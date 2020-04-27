@@ -54,7 +54,7 @@ void send_or_fail(int s, const char * buf, int len, int flags, const sockaddr * 
 		}
 		char tmp[BUFLEN];
 		Sleep(DELAY);
-		if ((recvfrom(s, tmp, len, 0, NULL, NULL)) == SOCKET_ERROR)
+		if ((recvfrom(s, tmp, BUFLEN, 0, NULL, NULL)) == SOCKET_ERROR)
 		{
 			printf("recvfrom() failed with error code : %d", WSAGetLastError());
 			getchar();
