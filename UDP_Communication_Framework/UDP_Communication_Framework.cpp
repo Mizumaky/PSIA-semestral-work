@@ -1,79 +1,118 @@
-#pragma comment(lib, "ws2_32.lib")
+﻿#pragma comment(lib, "ws2_32.lib")
 #include "stdafx.h"
 
 #include <iostream>
 #include <fstream>
 #include <string>
 #include <winsock2.h>
+#include <windows.h>
+#include <cstdio>
+#include <io.h>
+#include <fcntl.h>
 #include "ws2tcpip.h"
 #include "crc32.h"
 #include "sha256.h"
 
+
 // SETTINGS
+
 #define TARGET_IP	"192.168.30.24"
-#define BUFFERS_LEN 1024
-#define CRC_LEN 8
+
+#define START_PACKET_LEN 256
+#define DATA_PACKET_LEN 1024
+#define WINDOW 8
+
+#define CRC_LEN 4
 #define TYPE_LEN 1
-#define NUM_LEN 4
-#define DATA_LEN (BUFFERS_LEN - CRC_LEN - TYPE_LEN - NUM_LEN)
+#define NUMBER_LEN 4
 #define SHA_LEN 64
+#define NAME_LEN (START_PACKET_LEN - CRC_LEN - TYPE_LEN - NUMBER_LEN - SHA_LEN)
+#define DATA_LEN (DATA_PACKET_LEN - CRC_LEN - TYPE_LEN - NUMBER_LEN)
+#define ACK_PACKET_LEN (CRC_LEN + TYPE_LEN + NUMBER_LEN)
+
 #define TARGET_PORT 4444
 #define LOCAL_PORT 5555
 #define DEBUG false
 
+#define Y_STATUS 1
+#define Y_FILENAME 3
+#define Y_NUMBER 6
+#define Y_BAR 8
+
+// INITIAL DECLARATIONS
+
 enum type_t
 {
     START = 0,
-    END,
-    OK,
-    ERR,
-    NAME,
-    LEN,
     DATA,
-    CHKSUM,
+    ACK,
     TYPE_SIZE
 };
 
 std::string type_to_str[] = {
-    "START", "END", "OK", "ERR", "NAME", "LEN", "DATA", "CHKSUM"
+    "START", "DATA", "ACK"
 };
 
 struct com
 {
-    char buffer_rx[BUFFERS_LEN];
-    char buffer_tx[BUFFERS_LEN];
+    char packet_rx[DATA_PACKET_LEN];
+    char packet_tx[ACK_PACKET_LEN];
     SOCKET socket;
     sockaddr_in local_address;
     sockaddr_in target_address;
 } com;
 
+HANDLE h_std_out;
+int screen_width;
+int bar_height;
+int Y_INFO = 10;
+
+// FUNCTIONS
+
+void setPrintPos(int x, int y)
+{
+    const COORD position = { short(x), short(y) };
+    SetConsoleCursorPosition(h_std_out, position);
+}
+void setPrintPos(COORD position)
+{
+    SetConsoleCursorPosition(h_std_out, position);
+}
+
 void Error(std::string text)
 {
-    std::string error_text = "ERROR: " + text + " :C\n" + "INTERNAL ERRNO: ";
-    perror(error_text.c_str());
-    std::cerr << "\n";
+    setPrintPos(0, Y_INFO);
+    std::wstring wtext = std::wstring(text.begin(), text.end());
+    wprintf(L"ERROR: %s :C                                            \n", wtext.c_str());
     getchar();
 }
-
 void Warning(std::string text)
 {
-    std::cerr << "WARNING: " << text << "\n";
+    setPrintPos(0, Y_INFO);
+    std::wstring wtext = std::wstring(text.begin(), text.end());
+    wprintf(L"WARNING: %s                                             \n", wtext.c_str());
 }
-
 void Info(std::string text)
 {
-    std::cout << "INFO: " << text << "\n";
+    setPrintPos(0, Y_INFO);
+    std::wstring wtext = std::wstring(text.begin(), text.end());
+    wprintf(L"%s                                                      \n", wtext.c_str());
 }
-
+COORD indexToPos(int index)
+{
+    //Info("index = " + std::to_string(index) + "\n screen_width = " + std::to_string(screen_width) + "\n result =" + std::to_string(index % (screen_width - 2) + 1));
+    return { short(index % (screen_width - 2) + 1), short(Y_BAR + index / (screen_width - 2)) };
+}
 
 void InitWinsock()
 {
     WSADATA wsaData;
     WSAStartup(MAKEWORD(2, 2), &wsaData);
 }
-
 void InitApp()
 {
+    h_std_out = GetStdHandle(STD_OUTPUT_HANDLE);
+
     com.local_address.sin_family = AF_INET;
     com.local_address.sin_port = htons(LOCAL_PORT);
     com.local_address.sin_addr.s_addr = INADDR_ANY;
@@ -88,33 +127,46 @@ void InitApp()
     }
 }
 
-char* RecievePacket()
+void RecievePacket()
 {
-    const auto data = new char[BUFFERS_LEN];
-    //memset(com.buffer_rx, 0, BUFFERS_LEN);
-    if (recvfrom(com.socket, com.buffer_rx, BUFFERS_LEN, 0, nullptr, nullptr) == SOCKET_ERROR) {
+    //memset(com.buffer_rx, 0, DATA_PACKET_LEN);
+    if (recvfrom(com.socket, com.packet_rx, DATA_PACKET_LEN, 0, nullptr, nullptr) == SOCKET_ERROR) {
         Error("could not recieve data - socket error or timeout");
     }
-    memcpy(data, com.buffer_rx, BUFFERS_LEN);
-    return data;
+}
+void SendPacket()
+{
+    sendto(com.socket, com.packet_tx, ACK_PACKET_LEN, 0, (sockaddr*)&com.target_address, sizeof(com.target_address));
+}
+void SendACK(int32_t number)
+{
+    // TYPE
+    type_t type = ACK;
+    memcpy(&com.packet_tx[CRC_LEN], &type, TYPE_LEN);
+    // NUMBER
+    memcpy(&com.packet_tx[CRC_LEN + TYPE_LEN], &number, NUMBER_LEN);
+    // CRC
+    CRC32 crc32;
+    std::string crc = crc32(&com.packet_tx[CRC_LEN], TYPE_LEN + NUMBER_LEN);
+    memcpy(com.packet_tx, crc.c_str(), CRC_LEN);
+
+    SendPacket();
 }
 
-void SendPacket(char* data, int len)
-{
-    memset(com.buffer_tx, 0, BUFFERS_LEN);
-    memcpy(com.buffer_tx, data, len);
-    sendto(com.socket, com.buffer_tx, BUFFERS_LEN, 0, (sockaddr*)&com.target_address, sizeof(com.target_address));
-}
 
-void SendOK()
+bool isCrcOk(const char* data, size_t len)
 {
-    char ok = OK;
-    SendPacket(&ok, 1);
-}
-void SendERR()
-{
-    char err = ERR;
-    SendPacket(&err, 1);
+    // load received
+    char crc_tmp[CRC_LEN + 1] = "";
+    std::string recieved_crc = strncpy(crc_tmp, data, CRC_LEN);
+    // load rest of data and compute local
+    CRC32 crc32;
+    std::string computed_crc = crc32(&data[CRC_LEN], len - CRC_LEN);
+    if (computed_crc != recieved_crc) {
+        Warning("CRC check FAILED, recieved: " + recieved_crc + ", computed: " + computed_crc);
+        return false;
+    }
+    return true;
 }
 
 //**********************************************************************
@@ -122,144 +174,182 @@ int main()
 {
     InitWinsock();
     InitApp();
+    // INIT PRINTING
+    _setmode(_fileno(stdout), _O_U16TEXT);
+    CONSOLE_SCREEN_BUFFER_INFO scrnBufferInfo;
+    GetConsoleScreenBufferInfo(h_std_out, &scrnBufferInfo);
+    screen_width = scrnBufferInfo.srWindow.Right - scrnBufferInfo.srWindow.Left + 1;
+    if (!SetConsoleScreenBufferSize(h_std_out, { short(screen_width), 100 })) {
+        Error("could not prepare screen buffer");
+    }
+    // PRINT INTRO
+    setPrintPos(0, 0);
+    wprintf(L"|| Receiver v4.0 ||\n");
+    setPrintPos(0, Y_STATUS);
+    wprintf(L"STATUS: waiting for START packet...\n");
 
     // RECIEVE FILES
     while (true) {
 
-        // Start le state machine
-        Info("RECIEVER v2 initiated, waiting for START packet...");
-        type_t state = END;
-        int32_t expected_num = 0;
-        char filename[BUFFERS_LEN] = "";
-        int file_size = 0;
-        int recieved_data_size = 0;
-        char* data = nullptr;
-        char* packet = nullptr;
+        int32_t ack_number = -2;
+        int32_t packets_count;
+        bool* is_received;
 
-        // RECIEVE PACKETS
+        char filename[NAME_LEN + 1] = { '\0' };
+        int32_t file_size = 0;
+        char sha[SHA_LEN + 1] = { '\0' };
+        char* data;
+
+        // RECEIVE START PACKET
         while (true) {
-            // Recieve somthin
-            delete[] packet;
-            packet = RecievePacket();
-            Info("PACKET RECIEVED");
-            if (DEBUG) {
-                Info("--- PACKET START ---");
-                for (int i = 0; i < BUFFERS_LEN; ++i) {
-                    printf("%c",packet[i]);
-                }
-                Info("--- PACKET END ---");
-            }
+            RecievePacket();
+            // TYPE
+            if (type_t(com.packet_rx[CRC_LEN]) == START) {
+                // CRC
+                if (isCrcOk(com.packet_rx, START_PACKET_LEN)) {
+                    // FILE SIZE
+                    memcpy(&file_size, &com.packet_rx[CRC_LEN + TYPE_LEN], NUMBER_LEN);
+                    data = new char[file_size];
+                    packets_count = (file_size / DATA_LEN) + 1;
+                    is_received = new bool[packets_count]{false};
+                    // SHA 256
+                    memcpy(sha, &com.packet_rx[CRC_LEN + TYPE_LEN + NUMBER_LEN], SHA_LEN);
+                    // FILENAME
+                    strncpy(filename, &com.packet_rx[CRC_LEN + TYPE_LEN + NUMBER_LEN + SHA_LEN], NAME_LEN);
 
-            // Check CRC
-            char crc_tmp[CRC_LEN + 1] = "";
-            std::string recieved_crc = strncpy(crc_tmp, packet, CRC_LEN);
-            CRC32 crc32;
-            std::string computed_crc = crc32(&packet[CRC_LEN], BUFFERS_LEN - CRC_LEN);
-            if (computed_crc != recieved_crc) {
-                Warning("recieved a packet but CRC check FAILED, recieved: " + recieved_crc + ", computed: " + computed_crc);
-                SendERR();
-                Info("ERR packet sent back");
-                continue;
-            }
-
-            // Get packet type
-            if (packet[CRC_LEN] >= TYPE_SIZE || packet[CRC_LEN] < 0) {
-                Error("recieved unsupported packet type " + std::to_string(+packet[CRC_LEN]));
-                break;
-            }
-            const type_t type = type_t(packet[CRC_LEN]);
-
-         
-            Info("recieved packet of type " + type_to_str[type]);
-
-            // --- Decide what to do depending on type ---
-            // START
-            if (state == END && type == START) {
-            }
-            // FILENAME
-            else if (state == START && type == NAME) {
-                strcpy(filename, &packet[CRC_LEN + TYPE_LEN]);
-                Info("filename set to \"" + std::string(filename) + "\"");
-            }
-            // FILE SIZE
-            else if (state == NAME && type == LEN) {
-                if (sscanf(&packet[CRC_LEN + TYPE_LEN], "%d", &file_size) < 0) {
-                    Error("cannot convert characters to integer");
+                    // SEND OK AND CONTINUE TO NEXT PART
+                    ack_number++;
+                    SendACK(ack_number);
                     break;
                 }
-                data = new char[file_size];
-                Info("data buffer of size " + std::to_string(file_size) + " bytes created");
-            }
-            // DATA
-            else if ((state == LEN || state == DATA) && type == DATA) {
-				// Get packet number
-				int32_t recieved_num;
-				memcpy(&recieved_num, &packet[CRC_LEN + TYPE_LEN], 4);
-				if (recieved_num == expected_num - 1) {
-					Warning("recieved the same packet as before");
-					SendOK();
-					continue;
-				}
-				else if (recieved_num != expected_num) {
-					Error("recieved packet out of order, expected #" + std::to_string(expected_num) + ", recieved #" + std::to_string(recieved_num));
-					break;
-				}
-				expected_num++;
-
-				Info("recieved packet #" + std::to_string(recieved_num));
-
-                const int data_size_to_copy = file_size - recieved_data_size < DATA_LEN ? file_size - recieved_data_size : DATA_LEN;
-                memcpy(&data[recieved_data_size], &packet[CRC_LEN + TYPE_LEN + NUM_LEN], data_size_to_copy);
-                recieved_data_size += data_size_to_copy;
-                Info("recieved " + std::to_string(recieved_data_size) + " of " + std::to_string(file_size) + " bytes");
-            }
-            // SHA256
-            else if (state == DATA && type == CHKSUM) {
-                char sha_tmp[SHA_LEN + 1] = "";
-                std::string recieved_sha = strncpy(sha_tmp, &packet[CRC_LEN + TYPE_LEN], SHA_LEN);
-                SHA256 sha256;
-                std::string computed_sha = sha256(data, file_size);
-                if (computed_sha != recieved_sha) {
-                    Warning("SHA256 check FAILED, recieved: " + recieved_sha + ", computed: " + computed_sha);
-                    Info("trying to save file anyway");
-                }
-            }
-            // SAVE FILE
-            else if (state == CHKSUM && type == END) {
-                FILE* file = fopen(filename, "wb");
-                if (!file) {
-                    Error("cannot open file for writing");
-                    break;
-                }
-                fwrite(data, sizeof(char), file_size, file);
-                fclose(file);
-                Info("File saved");
             }
             else {
-                Warning("recieved packet of type " + type_to_str[type] + " while in state " + type_to_str[state] + ", that was unexpected");
-                break;
+                Warning("received packet type not START, waiting for START...");
+                SendACK(ack_number);
             }
+        }
 
-            // Confirm recieving
-            SendOK();
+        // PRINT START
+        setPrintPos(0, Y_STATUS);
+        wprintf(L"STATUS: waiting for DATA packets...\n");
+        setPrintPos(0, Y_FILENAME);
+        std::string filename_s = std::string(filename);
+        wprintf(L"FILENAME: %s\n", std::wstring(filename_s.begin(), filename_s.end()).c_str());
+        wprintf(L"FILE SIZE: %d bytes\n", file_size);
+        // PREPARE DOWNLOAD BAR
+        const int bar_height = ((packets_count - 1) / (screen_width - 2)) + 1;
+        Y_INFO = Y_BAR + bar_height + 3;
+        // --- rows
+        setPrintPos(0, Y_BAR - 1);
+        wprintf(L"%s", std::wstring(screen_width, '-').c_str());
+        setPrintPos(0, Y_BAR + bar_height);
+        wprintf(L"%s", std::wstring(screen_width, '-').c_str());
+        // | | signs
+        int remaining_tmp = packets_count;
+        int bar_offset = 0;
+        while (remaining_tmp > 0) {
+            setPrintPos(0, Y_BAR + bar_offset);
+            wprintf(L"|");
+            if (remaining_tmp >= screen_width - 2) {
+                setPrintPos(screen_width - 1, Y_BAR + bar_offset);
+                wprintf(L"|");
+            }
+            else {
+                setPrintPos(remaining_tmp + 1, Y_BAR + bar_offset);
+                wprintf(L"|");
+            }
+            remaining_tmp -= screen_width - 2;
+            bar_offset++;
+        }
 
-            // Update to new state
-            state = type;
 
-            // BREAK
-            if (state == END) {
+
+        // RECEIVE DATA PACKETS
+        while (true) {
+            RecievePacket();
+            // TYPE CHECK
+            if (type_t(com.packet_rx[CRC_LEN]) != DATA) {
+                Warning("received packet type not DATA, waiting for DATA...");
+                SendACK(ack_number);
+                continue;
+            }
+            // NUMBER CHECK
+			int32_t received_num;
+			memcpy(&received_num, &com.packet_rx[CRC_LEN + TYPE_LEN], NUMBER_LEN);
+			if (received_num <= ack_number) {
+                Warning("already received packet number " + std::to_string(received_num));
+                SendACK(ack_number);
+                continue;
+
+			}
+            // CRC CHECK
+            if (!isCrcOk(com.packet_rx, DATA_PACKET_LEN)) {
+                SendACK(ack_number);
+                if (received_num < packets_count) {
+                    setPrintPos(indexToPos(received_num));
+                    wprintf(L"!");
+                }
+                continue;
+            }
+            // GET DATA
+            const int data_size_to_copy = (received_num == packets_count - 1) ? file_size % DATA_LEN : DATA_LEN;
+            memcpy(&data[received_num * DATA_LEN], &com.packet_rx[CRC_LEN + TYPE_LEN + NUMBER_LEN], data_size_to_copy);
+            is_received[received_num] = true;
+            // UPDATE ACK NUMBER AND PRINT
+            while (ack_number + 1 < packets_count && is_received[ack_number + 1]) { // look one ahead
+                setPrintPos(indexToPos(ack_number)); // previous ack
+                wprintf(L"▓");
+                ack_number++; // update ack
+            }
+            setPrintPos(indexToPos(ack_number)); // current ack
+            wprintf(L"█");
+            // IF RECEIVED PACKET IS AHEAD PRINT SOFT SQUARE
+            if (received_num > ack_number) {
+                setPrintPos(indexToPos(received_num));
+                wprintf(L"▒");
+            }
+            // SEND ACK
+            SendACK(ack_number);
+            // BREAK IF END
+            if (ack_number == packets_count - 1) {
                 break;
             }
         }
 
-        // Ask for next file
+        // SHA256
+        SHA256 sha256;
+        std::string computed_sha = sha256(data, file_size);
+        std::string received_sha = sha;
+        if (computed_sha != received_sha) {
+            Warning("SHA256 check FAILED, recieved: " + received_sha + ", computed: " + computed_sha + "\n trying to save file anyway...");
+        }
+        else {
+            Info("SHA OK");
+        }
+        // SAVE FILE
+        FILE* file = fopen(filename, "wb");
+        if (!file) {
+            Error("cannot open file for writing");
+            break;
+        }
+        fwrite(data, sizeof(char), file_size, file);
+        fclose(file);
+        Info("File saved");
+    
+        // ASK FOR NEXT FILE
         delete[] data;
-        std::cout << "Communication finished, press Enter to recieve next file or 'q' + Enter to quit ...\n";
+        delete[] is_received;
+        Info("Communication finished, press Enter to recieve next file or 'q' + Enter to quit ...");
         if (getchar() == 'q') {
-            std::cout << "Goodbye...\n";
+            Info("Goodbye...");
             break;
         } else {
-            std::cout << "\n\n\n\n\n\n\n\n\n";
+            // CLEAR SCREEN
+            std::wstring spaces = std::wstring(screen_width, ' ');
+            for (int i = 0; i < 100; ++i) {
+                setPrintPos(0, i);
+                wprintf(L"%s", spaces.c_str());
+            }
         }
     }
 
@@ -268,4 +358,24 @@ int main()
     return 0;
 }
 
-// TODO possibly not waste copying from buffer_rx and _tx, and directly pass them 
+
+
+
+//// # TEST LOADING #
+//Sleep(500);
+//int cursor = 0;
+//for (int i = 0; i < packets_count; ++i) {
+//    // NASTAV ACK NA NEJAKOU HODNOTU
+//    ack_number++;
+//    Info("cursor = " + std::to_string(cursor) + " x = " + std::to_string(indexToPos(cursor).X) + " y = " + std::to_string(indexToPos(cursor).Y));
+//    // FUNKCE NA DOPLNENI semi transp a posledniho transp k poslednimu ack number
+//    while (cursor < ack_number) {
+//        setPrintPos(indexToPos(cursor));
+//        wprintf(L"▒▓");
+//        cursor++;
+//        Info("cursor = " + std::to_string(cursor) + " x = " + std::to_string(indexToPos(cursor).X) + " y = " + std::to_string(indexToPos(cursor).Y));
+//    }
+//    setPrintPos(indexToPos(cursor));
+//    wprintf(L"█");
+//    Sleep(50);
+//}

@@ -1,2 +1,3 @@
 ﻿  UDP_Communication_Framework.cpp
-  UDP_Communication_Framework.vcxproj -> C:\Users\mmull\win_code\PSIA\uloha 2\UDP_Communication_Framework v2\x64\Debug\UDP_Communication_Framework.exe
+C:\Users\mmull\win_code\PSIA\uloha 4\UDP_Communication_Framework v2\UDP_Communication_Framework\UDP_Communication_Framework.cpp(199,14): warning C4101: 'sha_256': unreferenced local variable
+  UDP_Communication_Framework.vcxproj -> C:\Users\mmull\win_code\PSIA\uloha 4\UDP_Communication_Framework v2\x64\Debug\UDP_Communication_Framework.exe
