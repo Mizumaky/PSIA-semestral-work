@@ -17,11 +17,13 @@
 #include "sha256.h"
 #include <Windows.h>
 
-#define SERVER "127.0.0.1"  //ip address of udp server
+#define SERVER "192.168.30.17"  //ip address of udp server
 #define BUFLEN 1024  //Max length of buffer[i]
 #define DATALEN 1011 //Max length of data in data packet
 #define CRC_LEN 8
-#define IN_AIR_COUNT 8
+#define MAX_IN_AIR_COUNT 50
+#define MIN_IN_AIR_COUNT 1
+#define START_IN_AIR_COUNT 15
 #define DELAY 20
 #define STARTLEN 256
 #define SHALEN 64
@@ -43,7 +45,7 @@ std::string type_to_str[] = {
 
 
 void send_or_fail(int s, const char * buf, int len, int flags, const sockaddr * to, int tolen) {
-
+	Sleep(200);
 	if ((sendto(s, buf, len, flags, to, tolen)) == SOCKET_ERROR)
 	{
 		printf("sendto() failed with error code : %d", WSAGetLastError());
@@ -52,56 +54,74 @@ void send_or_fail(int s, const char * buf, int len, int flags, const sockaddr * 
 }
 
 bool check_crc(char * packet, int len) {
+	// load received
+	char crc_tmp[CRC_LEN + 1] = "";
+	std::string recieved_crc = strncpy(crc_tmp, packet, CRC_LEN);
+	// load rest of data and compute local
 	CRC32 crc32;
-	std::string  computed_crc = crc32(&packet[CRC_LEN], len - CRC_LEN);
-	std::string  actual_crc;
-	memcpy(&actual_crc, &packet, CRC_LEN);
-	return actual_crc == computed_crc;
+	std::string computed_crc = crc32(&packet[CRC_LEN], len - CRC_LEN);
+	if (computed_crc != recieved_crc) {
+		std::cout << ("CRC check FAILED, recieved: " + recieved_crc + ", computed: " + computed_crc);
+		return false;
+	}
+	return true;
 }
 
 
 
 
-void send_packets(int s, std::vector<char*> &data, int flags, const sockaddr * to, int tolen) {
+void send_packets(int s, std::vector<char*> &data, int lastPacketLen, int flags, const sockaddr * to, int tolen) {
 
 	int lastReceivedPacket = -1;
-	int packetsToSendCount = IN_AIR_COUNT;
+	int packetsToSendCount = START_IN_AIR_COUNT;
 
-
-	while (lastReceivedPacket < (int)data.size()) {
+	while (lastReceivedPacket+1 < (int)data.size()) {
 		for (int i = lastReceivedPacket + 1; i <= lastReceivedPacket + 1 + packetsToSendCount; i++)
 		{
-			send_or_fail(s, data[i], strlen(data[i]), flags, to, tolen);
+			if (i == data.size()) {
+				break;
+			}
+			if(i == data.size()-1)
+				send_or_fail(s, data[i], lastPacketLen, flags, to, tolen);
+			else
+				send_or_fail(s, data[i], BUFLEN, flags, to, tolen);
 			printf("Send packet %d\n", i);
 		}
 		
-		int newCount = 0;
-		for (int i = 0; i < packetsToSendCount; i++)
+		int newCount = 1;
+
+		for (int i = 0; i < packetsToSendCount+1; i++)
 		{
 			int size;
 			char tmp[BUFLEN];
 			if ((size = recvfrom(s, tmp, BUFLEN, 0, NULL, NULL)) == SOCKET_ERROR)
 			{
 				printf("recvfrom() failed with error code : %d", WSAGetLastError());
-				getchar();
-				send_or_fail(s, data[lastReceivedPacket + 1], strlen(data[lastReceivedPacket + 1]), flags, to, tolen);
+				//getchar();
+				if (lastReceivedPacket + 1 >= (int)data.size()) break;
+				//send_or_fail(s, data[lastReceivedPacket + 1], strlen(data[lastReceivedPacket + 1]), flags, to, tolen);
 				//exit(EXIT_FAILURE);
+				break;
 			}
-			if (check_crc(tmp, size) && tmp[CRC_LEN] == (char)ACK) {
+			else if (check_crc(tmp, size) && tmp[CRC_LEN] == (char)ACK) {
 				int tmpLast;
 				memcpy(&tmpLast, &tmp[CRC_LEN + 1], sizeof(int));
 				printf("ACK %d\n", tmpLast);
-				if (tmpLast == lastReceivedPacket) {
-					send_or_fail(s, data[lastReceivedPacket + 1], strlen(data[lastReceivedPacket + 1]), flags, to, tolen);
-				}
-				else if (tmpLast > lastReceivedPacket) {
-					newCount += tmpLast-lastReceivedPacket+1;
+				//if (tmpLast == lastReceivedPacket) {
+				//	if (lastReceivedPacket + 1 >= (int)data.size()) break;
+
+					//send_or_fail(s, data[lastReceivedPacket + 1], strlen(data[lastReceivedPacket + 1]), flags, to, tolen);
+				//}
+				//else 
+				if (tmpLast > lastReceivedPacket) {
+					newCount += tmpLast - lastReceivedPacket+1;
 					lastReceivedPacket = tmpLast;
 				}
 			}
 			else break;
 		}
-		packetsToSendCount = newCount;
+		packetsToSendCount = max(MIN_IN_AIR_COUNT, min(newCount, MAX_IN_AIR_COUNT));
+		printf("packetsToSendCount %d\n", packetsToSendCount);
 	}
 }
 
@@ -117,7 +137,7 @@ void add_crc(char * packet, int len) {
 void pack_data(int packet_num, char * &buf, int len) {
 	buf[CRC_LEN] = DATA;
 	memcpy(&buf[CRC_LEN + 1], &packet_num, sizeof(int));
-	add_crc(buf, len);
+	add_crc(buf, len+1+sizeof(int));
 }
 
 void send_start_packet(int file_size, std::string filename, std::string checksum, int s, int flags, const sockaddr * to, int tolen) {
@@ -216,7 +236,7 @@ int main()
 
 	//start communication
 
-
+	int lastPacketLen = BUFLEN;
 	int tmp_size_of_file = size_of_file;
 	for (int i = 0; i < packetsNumber; i++) {
 		buffer[i] = (char*)calloc(BUFLEN, 1);
@@ -228,7 +248,7 @@ int main()
 		else {
 			fread(&buffer[i][CRC_LEN + sizeof(int) + 1], sizeof(char), tmp_size_of_file, f);
 			pack_data(i, buffer[i], tmp_size_of_file);
-
+			lastPacketLen = tmp_size_of_file;
 		}
 		tmp_size_of_file = tmp_size_of_file - DATALEN;
 	}
@@ -251,7 +271,7 @@ int main()
 	//send filename
 	send_start_packet(size_of_file, filename, sha256.getHash(), socket_num, 0, (struct sockaddr *) &si_other, slen);
 	
-	send_packets(socket_num, buffer, 0, (struct sockaddr *) &si_other, slen);
+	send_packets(socket_num, buffer, lastPacketLen+sizeof(int)+CRC_LEN+1, 0, (struct sockaddr *) &si_other, slen);
 
 	fclose(f);
 
