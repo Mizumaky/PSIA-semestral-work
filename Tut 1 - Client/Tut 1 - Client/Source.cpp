@@ -123,9 +123,9 @@ void pack_data(int packet_num, char * &buf, int len) {
 void send_start_packet(int file_size, std::string filename, std::string checksum, int s, int flags, const sockaddr * to, int tolen) {
 	int len = filename.length();
 	char* buf = (char*)calloc(CRC_LEN + 1 + sizeof(int) + SHALEN + filename.length(), sizeof(char));
-	buf[CRC_LEN] = START;
+	buf[CRC_LEN] = (char)START;
 	memcpy(&buf[CRC_LEN + 1], &file_size, sizeof(int));
-	memcpy(&buf[CRC_LEN + 1 + sizeof(int)], &checksum, SHALEN);
+	strcpy(&buf[CRC_LEN + 1 + sizeof(int)], checksum.c_str());
 	strcpy(&buf[CRC_LEN + 1 + sizeof(int) + SHALEN], filename.c_str());
 
 	add_crc(buf, 1 + sizeof(int) + SHALEN + filename.length());
