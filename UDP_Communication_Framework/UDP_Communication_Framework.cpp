@@ -310,7 +310,11 @@ int main()
                 continue;
             }
             // NUMBER CHECK
-            if ((received_num >= 0 && received_num < packets_count && is_received[received_num])) {
+            if (received_num < 0 || received_num >= packets_count) {
+                Error("received packet out of bounds, number = " + std::to_string(received_num));
+                continue;
+            }
+            else if (is_received[received_num]) {
                 SendACK(ack_number);
                 setPrintPos(0, Y_SP_FAIL);
                 wprintf(L"Same packet received count: %d\n", ++same_packet_received_count);
