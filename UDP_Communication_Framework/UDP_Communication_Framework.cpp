@@ -13,13 +13,13 @@
 #include "sha256.h"
 
 // SETTINGS
-#define TARGET_IP	"192.168.30.24"
+#define TARGET_IP	"127.0.0.1"
 
 #define START_PACKET_LEN 256
 #define DATA_PACKET_LEN 1024
 #define WINDOW 8
 
-#define CRC_LEN 4
+#define CRC_LEN 8
 #define TYPE_LEN 1
 #define NUMBER_LEN 4
 #define SHA_LEN 64
@@ -54,6 +54,7 @@ std::string type_to_str[] = {
 struct com
 {
     char packet_rx[DATA_PACKET_LEN];
+    int size_received;
     char packet_tx[ACK_PACKET_LEN];
     SOCKET socket;
     sockaddr_in local_address;
@@ -139,7 +140,7 @@ void InitApp()
 void RecievePacket()
 {
     //memset(com.buffer_rx, 0, DATA_PACKET_LEN);
-    if (recvfrom(com.socket, com.packet_rx, DATA_PACKET_LEN, 0, nullptr, nullptr) == SOCKET_ERROR) {
+    if ((com.size_received = recvfrom(com.socket, com.packet_rx, DATA_PACKET_LEN, 0, nullptr, nullptr)) == SOCKET_ERROR) {
         Error("could not recieve data - socket error or timeout");
     }
 }
@@ -210,7 +211,7 @@ int main()
             // TYPE
             if (type_t(com.packet_rx[CRC_LEN]) == START) {
                 // CRC
-                if (isCrcOk(com.packet_rx, START_PACKET_LEN)) {
+                if (isCrcOk(com.packet_rx, com.size_received)) {
                     // FILE SIZE
                     memcpy(&file_size, &com.packet_rx[CRC_LEN + TYPE_LEN], NUMBER_LEN);
                     data = new char[file_size];
@@ -234,7 +235,7 @@ int main()
             else {
                 SendACK(ack_number);
                 wrong_type_count++;
-                Warning("received packet type not START, waiting for START...");
+                Warning("received packet type not START");
             }
         }
 
