@@ -62,13 +62,13 @@ bool check_crc(char * packet, int len) {
 
 
 
-int send_packets(int s, std::vector<char*> &data, int flags, const sockaddr * to, int tolen) {
+void send_packets(int s, std::vector<char*> &data, int flags, const sockaddr * to, int tolen) {
 
 	int lastReceivedPacket = -1;
 	int packetsToSendCount = IN_AIR_COUNT;
 
 
-	while (lastReceivedPacket < data.size()) {
+	while (lastReceivedPacket < (int)data.size()) {
 		for (int i = lastReceivedPacket + 1; i <= lastReceivedPacket + 1 + packetsToSendCount; i++)
 		{
 			send_or_fail(s, data[i], strlen(data[i]), flags, to, tolen);
@@ -121,15 +121,27 @@ void pack_data(int packet_num, char * &buf, int len) {
 }
 
 void send_start_packet(int file_size, std::string filename, std::string checksum, int s, int flags, const sockaddr * to, int tolen) {
-	int len = filename.length();
-	char* buf = (char*)calloc(CRC_LEN + 1 + sizeof(int) + SHALEN + filename.length(), sizeof(char));
-	buf[CRC_LEN] = (char)START;
-	memcpy(&buf[CRC_LEN + 1], &file_size, sizeof(int));
-	strcpy(&buf[CRC_LEN + 1 + sizeof(int)], checksum.c_str());
-	strcpy(&buf[CRC_LEN + 1 + sizeof(int) + SHALEN], filename.c_str());
+	int ack = -2;
+	while(ack == -2){
+		int len = filename.length();
+		char* buf = (char*)calloc(CRC_LEN + 1 + sizeof(int) + SHALEN + filename.length(), sizeof(char));
+		buf[CRC_LEN] = (char)START;
+		memcpy(&buf[CRC_LEN + 1], &file_size, sizeof(int));
+		strcpy(&buf[CRC_LEN + 1 + sizeof(int)], checksum.c_str());
+		strcpy(&buf[CRC_LEN + 1 + sizeof(int) + SHALEN], filename.c_str());
 
-	add_crc(buf, 1 + sizeof(int) + SHALEN + filename.length());
-	send_or_fail(s, buf, CRC_LEN + 1 + sizeof(int) + SHALEN + filename.length(), flags, to, tolen);
+		add_crc(buf, 1 + sizeof(int) + SHALEN + filename.length());
+		send_or_fail(s, buf, CRC_LEN + 1 + sizeof(int) + SHALEN + filename.length(), flags, to, tolen);
+
+
+		char tmp[BUFLEN];
+		if (recvfrom(s, tmp, BUFLEN, 0, NULL, NULL) == SOCKET_ERROR)
+		{
+			continue;
+		}
+		if(tmp[CRC_LEN] == ACK)
+			memcpy(&ack, &tmp[CRC_LEN + 1], sizeof(int));
+	}
 }
 
 
