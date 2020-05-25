@@ -13,7 +13,7 @@
 #include "sha256.h"
 
 // SETTINGS
-#define TARGET_IP	"127.0.0.1"
+#define TARGET_IP	"192.168.30.18"
 
 #define START_PACKET_LEN 256
 #define DATA_PACKET_LEN 1024
@@ -284,19 +284,19 @@ int main()
         // RECEIVE DATA PACKETS
         while (true) {
             RecievePacket();
-            // TYPE GET/CHECK
-            if (type_t(com.packet_rx[CRC_LEN]) != DATA) {
+            // PACKET SIZE CHECK
+            if (!(com.size_received == DATA_PACKET_LEN || com.size_received == CRC_LEN + TYPE_LEN + NUMBER_LEN + file_size % DATA_LEN)) {
                 SendACK(ack_number);
                 SetPrintPos(0, Y_WT_FAIL);
                 wprintf(L"Wrong packet type count: %d\n", ++wrong_type_count);
-                Warning("received packet type not DATA");
+                Warning("size of packet received = " + std::to_string(com.size_received) + " expected = " + std::to_string(DATA_PACKET_LEN));
                 continue;
             }
             // NUMBER GET
 			int32_t received_num;
 			memcpy(&received_num, &com.packet_rx[CRC_LEN + TYPE_LEN], NUMBER_LEN);
             // CRC GET/CHECK
-            if (!isCrcOk(com.packet_rx, DATA_PACKET_LEN)) {
+            if (!isCrcOk(com.packet_rx, com.size_received)) {
                 SendACK(ack_number);
                 SetPrintPos(0, Y_CRC_FAIL);
                 wprintf(L"CRC fail count: %d\n", ++crc_fail_count);
@@ -304,6 +304,14 @@ int main()
                     SetPrintPos(IndexToPos(received_num));
                     wprintf(L"!");
                 }
+                continue;
+            }
+            // TYPE GET/CHECK
+            if (type_t(com.packet_rx[CRC_LEN]) != DATA) {
+                SendACK(ack_number);
+                SetPrintPos(0, Y_WT_FAIL);
+                wprintf(L"Wrong packet type count: %d\n", ++wrong_type_count);
+                Warning("received packet type not DATA");
                 continue;
             }
             // NUMBER CHECK
@@ -324,8 +332,10 @@ int main()
             is_received[received_num] = true;
             // UPDATE ACK NUMBER AND PRINT
             while (ack_number + 1 < packets_count && is_received[ack_number + 1]) { // look one ahead if received
-                SetPrintPos(IndexToPos(ack_number)); // previous ack
-                wprintf(L"▓");
+                if (ack_number >= 0) {
+                    SetPrintPos(IndexToPos(ack_number)); // previous ack
+                    wprintf(L"▓");
+                }
                 ack_number++; // update ack
             }
             SetPrintPos(IndexToPos(ack_number)); // current ack
@@ -339,7 +349,7 @@ int main()
             }
             // PRINT ACK NUMBER
             SetPrintPos(0, Y_NUMBER); // current ack
-            wprintf(L"| ACK %d / %d |", ack_number, packets_count);
+            wprintf(L"| ACK %d / %d |", ack_number, packets_count - 1);
             // BREAK IF END
             if (ack_number == packets_count - 1) {
                 break;
