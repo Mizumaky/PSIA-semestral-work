@@ -21,9 +21,9 @@
 #define BUFLEN 1024  //Max length of buffer[i]
 #define DATALEN 1011 //Max length of data in data packet
 #define CRC_LEN 8
-#define MAX_IN_AIR_COUNT 10
+#define MAX_IN_AIR_COUNT 20
 #define MIN_IN_AIR_COUNT 1
-#define START_IN_AIR_COUNT 5
+#define START_IN_AIR_COUNT 10
 #define DELAY 20
 #define STARTLEN 256
 #define SHALEN 64
@@ -45,7 +45,7 @@ std::string type_to_str[] = {
 
 
 void send_or_fail(int s, const char * buf, int len, int flags, const sockaddr * to, int tolen) {
-	//Sleep(10);
+	Sleep(10);
 	if ((sendto(s, buf, len, flags, to, tolen)) == SOCKET_ERROR)
 	{
 		printf("sendto() failed with error code : %d", WSAGetLastError());
@@ -76,22 +76,20 @@ void send_packets(int s, std::vector<char*> &data, int lastPacketLen, int flags,
 	int lastSendPacket = -1;
 	int packetsToSendCount = START_IN_AIR_COUNT;
 
-	while (lastReceivedPacket+1 < (int)data.size()) {
-		for (int i = lastSendPacket + 1; i <= lastSendPacket + 1 + packetsToSendCount; i++)
+	int lastSentAgain = -1;
+	int lastSentAgainCount = 0;
+	while (lastSendPacket + 1 < (int)data.size()) {
+		for (int i = lastSendPacket + 1; i <= min(lastSendPacket + 1 + packetsToSendCount, data.size()-1); i++)
 		{
-			if (i == data.size()) {
-				break;
-			}
-			if(i == data.size()-1)
+			if (i == data.size() - 1)
 				send_or_fail(s, data[i], lastPacketLen, flags, to, tolen);
 			else
 				send_or_fail(s, data[i], BUFLEN, flags, to, tolen);
 			printf("Send packet %d\n", i);
 		}
-		lastSendPacket += 1 + packetsToSendCount;
-		int newCount = 1;
-		bool sentAgain = false;
-		for (int i = 0; i < packetsToSendCount+1; i++)
+
+		int newCount = 0;
+		for (int i = 0; i < packetsToSendCount; i++)
 		{
 			int size;
 			char tmp[BUFLEN];
@@ -99,14 +97,15 @@ void send_packets(int s, std::vector<char*> &data, int lastPacketLen, int flags,
 			{
 				printf("recvfrom() failed with error code : %d\n", WSAGetLastError());
 				//getchar();
-				if (lastReceivedPacket + 1 >= (int)data.size()) break; 
-				if(!sentAgain){
+				if (lastReceivedPacket + 1 >= (int)data.size()) break;
+				///if(lastReceivedPacket + 1 != lastSentAgain){
+				lastSentAgain = lastReceivedPacket + 1;
 				if (lastReceivedPacket + 1 == data.size() - 1)
 					send_or_fail(s, data[lastReceivedPacket + 1], lastPacketLen, flags, to, tolen);
 				else
 					send_or_fail(s, data[lastReceivedPacket + 1], BUFLEN, flags, to, tolen);
 				//sentAgain = true;
-				}
+			//	}
 				//exit(EXIT_FAILURE);
 				break;
 			}
@@ -114,24 +113,60 @@ void send_packets(int s, std::vector<char*> &data, int lastPacketLen, int flags,
 				int tmpLast;
 				memcpy(&tmpLast, &tmp[CRC_LEN + 1], sizeof(int));
 				printf("ACK %d\n", tmpLast);
-			   if (tmpLast == lastReceivedPacket && !sentAgain) {
-				//   sentAgain = true;
+				if (tmpLast == lastReceivedPacket && (tmpLast != lastSentAgain || lastSentAgainCount < 3)) {
+					if (tmpLast == lastSentAgain)
+						lastSentAgainCount++;
+					else{
+						lastSentAgainCount = 0;
+					lastSentAgain = tmpLast;
+					}
 					if (lastReceivedPacket + 1 >= (int)data.size()) break;
 
 					if (lastReceivedPacket + 1 == data.size() - 1)
 						send_or_fail(s, data[lastReceivedPacket + 1], lastPacketLen, flags, to, tolen);
 					else
-			    		send_or_fail(s, data[lastReceivedPacket + 1], BUFLEN, flags, to, tolen);
+						send_or_fail(s, data[lastReceivedPacket + 1], BUFLEN, flags, to, tolen);
+					//while (recvfrom(s, tmp, BUFLEN, 0, NULL, NULL) != SOCKET_ERROR) {} break;
 				}
-				else 
-				if (tmpLast > lastReceivedPacket) {
-					newCount += tmpLast - lastReceivedPacket;
-					lastReceivedPacket = tmpLast;
-				}
+				else
+					if (tmpLast > lastReceivedPacket) {
+						newCount += tmpLast - lastReceivedPacket;
+						lastReceivedPacket = tmpLast;
+					}
 			}
 		}
+
 		packetsToSendCount = max(MIN_IN_AIR_COUNT, min(newCount, MAX_IN_AIR_COUNT));
+		lastSendPacket = min(lastSendPacket + 1 + packetsToSendCount, lastSendPacket + MAX_IN_AIR_COUNT / 2);
 		printf("packetsToSendCount %d\n", packetsToSendCount);
+		
+	}
+	char tmp[BUFLEN];
+	while (recvfrom(s, tmp, BUFLEN, 0, NULL, NULL) != SOCKET_ERROR)
+	{
+
+	}
+	while (lastReceivedPacket + 1 < (int)data.size()) {
+		if (lastReceivedPacket + 1 == data.size() - 1)
+			send_or_fail(s, data[lastReceivedPacket + 1], lastPacketLen, flags, to, tolen);
+		else
+			send_or_fail(s, data[lastReceivedPacket + 1], BUFLEN, flags, to, tolen);
+
+		Sleep(10);
+		int size;
+		char tmp[BUFLEN];
+		if ((size = recvfrom(s, tmp, BUFLEN, 0, NULL, NULL)) == SOCKET_ERROR)
+		{
+			
+		}
+		else if (check_crc(tmp, size) && tmp[CRC_LEN] == (char)ACK) {
+			int tmpLast;
+			memcpy(&tmpLast, &tmp[CRC_LEN + 1], sizeof(int));
+			printf("ACK %d\n", tmpLast);
+		    if (tmpLast > lastReceivedPacket) {
+				lastReceivedPacket = tmpLast;
+			}
+		}
 	}
 }
 
@@ -147,12 +182,12 @@ void add_crc(char * packet, int len) {
 void pack_data(int packet_num, char * &buf, int len) {
 	buf[CRC_LEN] = DATA;
 	memcpy(&buf[CRC_LEN + 1], &packet_num, sizeof(int));
-	add_crc(buf, len+1+sizeof(int));
+	add_crc(buf, len + 1 + sizeof(int));
 }
 
 void send_start_packet(int file_size, std::string filename, std::string checksum, int s, int flags, const sockaddr * to, int tolen) {
 	int ack = -2;
-	while(ack == -2){
+	while (ack == -2) {
 		int len = filename.length();
 		char* buf = (char*)calloc(CRC_LEN + 1 + sizeof(int) + SHALEN + filename.length(), sizeof(char));
 		buf[CRC_LEN] = (char)START;
@@ -169,7 +204,7 @@ void send_start_packet(int file_size, std::string filename, std::string checksum
 		{
 			continue;
 		}
-		if(tmp[CRC_LEN] == ACK)
+		if (tmp[CRC_LEN] == ACK)
 			memcpy(&ack, &tmp[CRC_LEN + 1], sizeof(int));
 	}
 }
@@ -185,7 +220,7 @@ int main()
 
 
 
-	char* filename = "64681_1574025586.webp";
+	char* filename = "stest.jpg";
 
 	std::cout << strlen(filename);
 	//Initialise winsock
@@ -212,7 +247,7 @@ int main()
 		std::cout << "socket binding unsuccessful";
 		exit(EXIT_FAILURE);
 	}
-	struct timeval timeout = { 1000,1000 }; //set timeout for 2 seconds
+	struct timeval timeout = { 100,100 }; //set timeout for 2 seconds
 
 	/* set receive UDP message timeout */
 
@@ -280,8 +315,8 @@ int main()
 
 	//send filename
 	send_start_packet(size_of_file, filename, sha256.getHash(), socket_num, 0, (struct sockaddr *) &si_other, slen);
-	
-	send_packets(socket_num, buffer, lastPacketLen+sizeof(int)+CRC_LEN+1, 0, (struct sockaddr *) &si_other, slen);
+
+	send_packets(socket_num, buffer, lastPacketLen + sizeof(int) + CRC_LEN + 1, 0, (struct sockaddr *) &si_other, slen);
 
 	fclose(f);
 
