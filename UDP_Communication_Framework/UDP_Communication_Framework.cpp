@@ -38,6 +38,8 @@
 #define Y_FILENAME 3
 #define Y_NUMBER 6
 #define Y_BAR 8
+#define Y_FAILS_OFFSET 3
+#define Y_INFO_OFFSET 7
 
 // INITIAL DECLARATIONS
 
@@ -65,7 +67,10 @@ struct com
 HANDLE h_std_out;
 int screen_width;
 int bar_height;
-int Y_INFO = 10;
+int Y_CRC_FAIL = Y_BAR + 3 + Y_FAILS_OFFSET;
+int Y_WT_FAIL = Y_BAR + 3 + Y_FAILS_OFFSET + 1;
+int Y_SP_FAIL = Y_BAR + 3 + Y_FAILS_OFFSET + 2;
+int Y_INFO = Y_BAR + 3 + Y_INFO_OFFSET;
 
 // FUNCTIONS
 
@@ -193,6 +198,9 @@ int main()
 
         int32_t ack_number = -2;
         int32_t packets_count;
+        unsigned int crc_fail_count = 0;
+        unsigned int wrong_type_count = 0;
+        unsigned int same_packet_received_count = 0;
         bool* is_received;
 
         char filename[NAME_LEN + 1] = { '\0' };
@@ -222,10 +230,15 @@ int main()
                     SendACK(ack_number);
                     break;
                 }
+                else {
+                    SendACK(ack_number);
+                    crc_fail_count++;
+                }
             }
             else {
-                Warning("received packet type not START, waiting for START...");
                 SendACK(ack_number);
+                wrong_type_count++;
+                Warning("received packet type not START, waiting for START...");
             }
         }
 
@@ -238,7 +251,10 @@ int main()
         wprintf(L"FILE SIZE: %d bytes\n", file_size);
         // PREPARE DOWNLOAD BAR
         const int bar_height = ((packets_count - 1) / (screen_width - 2)) + 1;
-        Y_INFO = Y_BAR + bar_height + 3;
+        Y_CRC_FAIL = Y_BAR + bar_height + Y_FAILS_OFFSET;
+        Y_WT_FAIL = Y_BAR + bar_height + Y_FAILS_OFFSET + 1;
+        Y_SP_FAIL = Y_BAR + bar_height + Y_FAILS_OFFSET + 2;
+        Y_INFO = Y_BAR + bar_height + Y_INFO_OFFSET;
         // --- rows
         setPrintPos(0, Y_BAR - 1);
         wprintf(L"%s", std::wstring(screen_width, '-').c_str());
@@ -261,36 +277,50 @@ int main()
             remaining_tmp -= screen_width - 2;
             bar_offset++;
         }
+        // fails
+        setPrintPos(0, Y_CRC_FAIL);
+        wprintf(L"CRC fail count: %d\n", crc_fail_count);
+        wprintf(L"Wrong packet type count: %d\n", wrong_type_count);
+        wprintf(L"Same packet received count: %d\n", same_packet_received_count);
 
 
         // RECEIVE DATA PACKETS
         while (true) {
             RecievePacket();
-            // TYPE CHECK
+            // TYPE GET/CHECK
             if (type_t(com.packet_rx[CRC_LEN]) != DATA) {
-                Warning("received packet type not DATA, waiting for DATA...");
                 SendACK(ack_number);
+                wrong_type_count++;
+                setPrintPos(0, Y_WT_FAIL);
+                wprintf(L"Wrong packet type count: %d\n", wrong_type_count);
+                Warning("received packet type not DATA");
                 continue;
             }
-            // NUMBER CHECK
+            // NUMBER GET
 			int32_t received_num;
 			memcpy(&received_num, &com.packet_rx[CRC_LEN + TYPE_LEN], NUMBER_LEN);
-			if (received_num <= ack_number) {
-                Warning("already received packet number " + std::to_string(received_num));
-                SendACK(ack_number);
-                continue;
-
-			}
-            // CRC CHECK
+            // CRC GET/CHECK
             if (!isCrcOk(com.packet_rx, DATA_PACKET_LEN)) {
                 SendACK(ack_number);
-                if (received_num < packets_count) {
+                crc_fail_count++;
+                setPrintPos(0, Y_CRC_FAIL);
+                wprintf(L"CRC fail count: %d\n", crc_fail_count);
+                if (received_num >= 0 && received_num < packets_count) {
                     setPrintPos(indexToPos(received_num));
                     wprintf(L"!");
                 }
                 continue;
             }
-            // GET DATA
+            // NUMBER CHECK
+            if ((received_num >= 0 && received_num < packets_count && is_received[received_num])) {
+                SendACK(ack_number);
+                same_packet_received_count++;
+                setPrintPos(0, Y_SP_FAIL);
+                wprintf(L"Same packet received count: %d\n", same_packet_received_count);
+                Warning("already received packet number " + std::to_string(received_num));
+                continue;
+            }
+            // DATA GET
             const int data_size_to_copy = (received_num == packets_count - 1) ? file_size % DATA_LEN : DATA_LEN;
             memcpy(&data[received_num * DATA_LEN], &com.packet_rx[CRC_LEN + TYPE_LEN + NUMBER_LEN], data_size_to_copy);
             is_received[received_num] = true;
@@ -309,6 +339,9 @@ int main()
                 setPrintPos(indexToPos(received_num));
                 wprintf(L"▒");
             }
+            // PRINT ACK NUMBER
+            setPrintPos(0, Y_NUMBER); // current ack
+            wprintf(L"| ACK %d / %d |", ack_number, packets_count);
             // BREAK IF END
             if (ack_number == packets_count - 1) {
                 break;
@@ -320,7 +353,7 @@ int main()
         std::string computed_sha = sha256(data, file_size);
         std::string received_sha = sha;
         if (computed_sha != received_sha) {
-            Warning("SHA256 check FAILED, recieved: " + received_sha + ", computed: " + computed_sha + "\n trying to save file anyway...");
+            Warning("SHA256 check FAILED\nrecieved: " + received_sha + "\ncomputed: " + computed_sha + "\nTrying to save file anyway...");
         }
         else {
             Info("SHA OK");
