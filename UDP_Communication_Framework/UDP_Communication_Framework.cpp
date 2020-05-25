@@ -303,7 +303,7 @@ int main()
                 SendACK(ack_number);
                 setPrintPos(0, Y_CRC_FAIL);
                 wprintf(L"CRC fail count: %d\n", ++crc_fail_count);
-                if (received_num >= 0 && received_num < packets_count) {
+                if (received_num > ack_number && received_num < packets_count) {
                     setPrintPos(indexToPos(received_num));
                     wprintf(L"!");
                 }
@@ -314,7 +314,7 @@ int main()
                 Error("received packet out of bounds, number = " + std::to_string(received_num));
                 continue;
             }
-            else if (is_received[received_num]) {
+            if (is_received[received_num]) {
                 SendACK(ack_number);
                 setPrintPos(0, Y_SP_FAIL);
                 wprintf(L"Same packet received count: %d\n", ++same_packet_received_count);
