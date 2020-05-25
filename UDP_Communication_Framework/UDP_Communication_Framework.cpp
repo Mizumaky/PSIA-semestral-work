@@ -290,9 +290,8 @@ int main()
             // TYPE GET/CHECK
             if (type_t(com.packet_rx[CRC_LEN]) != DATA) {
                 SendACK(ack_number);
-                wrong_type_count++;
                 setPrintPos(0, Y_WT_FAIL);
-                wprintf(L"Wrong packet type count: %d\n", wrong_type_count);
+                wprintf(L"Wrong packet type count: %d\n", ++wrong_type_count);
                 Warning("received packet type not DATA");
                 continue;
             }
@@ -302,9 +301,8 @@ int main()
             // CRC GET/CHECK
             if (!isCrcOk(com.packet_rx, DATA_PACKET_LEN)) {
                 SendACK(ack_number);
-                crc_fail_count++;
                 setPrintPos(0, Y_CRC_FAIL);
-                wprintf(L"CRC fail count: %d\n", crc_fail_count);
+                wprintf(L"CRC fail count: %d\n", ++crc_fail_count);
                 if (received_num >= 0 && received_num < packets_count) {
                     setPrintPos(indexToPos(received_num));
                     wprintf(L"!");
@@ -314,9 +312,8 @@ int main()
             // NUMBER CHECK
             if ((received_num >= 0 && received_num < packets_count && is_received[received_num])) {
                 SendACK(ack_number);
-                same_packet_received_count++;
                 setPrintPos(0, Y_SP_FAIL);
-                wprintf(L"Same packet received count: %d\n", same_packet_received_count);
+                wprintf(L"Same packet received count: %d\n", ++same_packet_received_count);
                 Warning("already received packet number " + std::to_string(received_num));
                 continue;
             }
