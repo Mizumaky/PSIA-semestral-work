@@ -33,7 +33,8 @@ enum type_t
 {
 	START = 0,
 	DATA,
-	ACK
+	ACK,
+	TYPE_SIZE
 };
 
 std::string type_to_str[] = {
@@ -83,7 +84,8 @@ int send_packets(int s, std::vector<char*> &data, int flags, const sockaddr * to
 			{
 				printf("recvfrom() failed with error code : %d", WSAGetLastError());
 				getchar();
-				exit(EXIT_FAILURE);
+				send_or_fail(s, data[lastReceivedPacket + 1], strlen(data[lastReceivedPacket + 1]), flags, to, tolen);
+				//exit(EXIT_FAILURE);
 			}
 			if (check_crc(tmp, size) && tmp[CRC_LEN] == (char)ACK) {
 				int tmpLast;
@@ -93,8 +95,8 @@ int send_packets(int s, std::vector<char*> &data, int flags, const sockaddr * to
 					send_or_fail(s, data[lastReceivedPacket + 1], strlen(data[lastReceivedPacket + 1]), flags, to, tolen);
 				}
 				else if (tmpLast > lastReceivedPacket) {
+					newCount += tmpLast-lastReceivedPacket+1;
 					lastReceivedPacket = tmpLast;
-					newCount++;
 				}
 			}
 			else break;
@@ -120,11 +122,12 @@ void pack_data(int packet_num, char * &buf, int len) {
 
 void send_start_packet(int file_size, std::string filename, std::string checksum, int s, int flags, const sockaddr * to, int tolen) {
 	int len = filename.length();
-	char* buf = (char*)calloc(STARTLEN, sizeof(char));
+	char* buf = (char*)calloc(CRC_LEN + 1 + sizeof(int) + SHALEN + filename.length(), sizeof(char));
 	buf[CRC_LEN] = START;
 	memcpy(&buf[CRC_LEN + 1], &file_size, sizeof(int));
 	memcpy(&buf[CRC_LEN + 1 + sizeof(int)], &checksum, SHALEN);
-	memcpy(&buf[CRC_LEN + 1 + sizeof(int) + SHALEN], &filename, SHALEN);
+	strcpy(&buf[CRC_LEN + 1 + sizeof(int) + SHALEN], filename.c_str());
+
 	add_crc(buf, 1 + sizeof(int) + SHALEN + filename.length());
 	send_or_fail(s, buf, CRC_LEN + 1 + sizeof(int) + SHALEN + filename.length(), flags, to, tolen);
 }
