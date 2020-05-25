@@ -263,7 +263,6 @@ int main()
         }
 
 
-
         // RECEIVE DATA PACKETS
         while (true) {
             RecievePacket();
@@ -296,20 +295,20 @@ int main()
             memcpy(&data[received_num * DATA_LEN], &com.packet_rx[CRC_LEN + TYPE_LEN + NUMBER_LEN], data_size_to_copy);
             is_received[received_num] = true;
             // UPDATE ACK NUMBER AND PRINT
-            while (ack_number + 1 < packets_count && is_received[ack_number + 1]) { // look one ahead
+            while (ack_number + 1 < packets_count && is_received[ack_number + 1]) { // look one ahead if received
                 setPrintPos(indexToPos(ack_number)); // previous ack
                 wprintf(L"▓");
                 ack_number++; // update ack
             }
             setPrintPos(indexToPos(ack_number)); // current ack
             wprintf(L"█");
-            // IF RECEIVED PACKET IS AHEAD PRINT SOFT SQUARE
+            // SEND ACK
+            SendACK(ack_number);
+            // IF RECEIVED PACKET IS STILL AHEAD OF ACK PRINT SOFT SQUARE
             if (received_num > ack_number) {
                 setPrintPos(indexToPos(received_num));
                 wprintf(L"▒");
             }
-            // SEND ACK
-            SendACK(ack_number);
             // BREAK IF END
             if (ack_number == packets_count - 1) {
                 break;
@@ -361,7 +360,7 @@ int main()
 
 
 
-//// # TEST LOADING #
+//// # TEST LOADING SCREEN #
 //Sleep(500);
 //int cursor = 0;
 //for (int i = 0; i < packets_count; ++i) {
